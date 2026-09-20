@@ -2,13 +2,15 @@
 
 Part of the [S0 documentation set](README.md).
 
-Status: AI-written design draft at the user's explicit request on 2026-09-16. It is not client implementation code and has not recorded a real request yet.
+Status: record-format documentation. It is not by itself evidence that the current client or server has completed a request.
 
 Each completed request will eventually occupy one JSON line. Before a request, initialize fields whose values are unknown as `null`; fill them only from captured client events or a documented token-counting method.
 
 ```json
 {
   "request_id": "s0-001",
+  "run_id": "f8ff34d4-178c-4a81-b6cb-b04e43067884",
+  "phase": "measure",
   "model_id": "qwen3-0.6b-s0",
   "replica_id": "replica-0",
   "request": {
@@ -26,16 +28,22 @@ Each completed request will eventually occupy one JSON line. Before a request, i
     "submit_wall_ts": null,
     "first_content_wall_ts": null,
     "completed_wall_ts": null,
+    "last_content_wall_ts": null,
     "submit_monotonic_ns": null,
     "first_content_monotonic_ns": null,
     "completed_monotonic_ns": null,
+    "last_content_monotonic_ns": null,
     "ttft_ms": null,
-    "e2e_ms": null
+    "e2e_ms": null,
+    "tpot_ms": null
   },
+  "http_status": null,
+  "done_seen": null,
   "output": {
     "text": null,
     "prompt_tokens": null,
     "completion_tokens": null,
+    "completion_token_count_source": null,
     "finish_reason": null,
     "tokenization_error": null
   },
@@ -55,11 +63,15 @@ Each completed request will eventually occupy one JSON line. Before a request, i
 - `submit_*`: immediately before the HTTP request is submitted.
 - `first_content_*`: at the first SSE chunk with a non-empty generated `delta.content`; do not use the initial assistant-role chunk with empty content.
 - `completed_*`: when the terminal SSE event is observed.
+- `last_content_*`: at the final non-empty `delta.content` observed before `[DONE]`.
 - `ttft_ms`: `(first_content_monotonic_ns - submit_monotonic_ns) / 1_000_000`.
 - `e2e_ms`: `(completed_monotonic_ns - submit_monotonic_ns) / 1_000_000`.
-- `prompt_tokens` and `completion_tokens`: remain `null` until the client has a specified, reproducible counting source. Never estimate and store a guessed value.
+- `tpot_ms`: an estimate only. When output text can be locally re-encoded into `N >= 2` tokens, it is `(last_content_monotonic_ns - first_content_monotonic_ns) / (N - 1) / 1_000_000`; otherwise it remains `null`. Re-encoded text tokens and SSE chunks are not the server's original decode-token timing.
+- `prompt_tokens`: remains `null` because the current client has no recorded source for it.
+- `completion_tokens`: is `null` until the client has a specified, reproducible counting source. The current local-text method records the re-encoded count and sets `completion_token_count_source` to `"local_reencode_output_text"`; it is an estimate and not the server's native decode-token count.
 - `output.tokenization_error`: `null` when client-side output-text encoding succeeds or is not requested; otherwise the caught encoding error string. A tokenization failure is a post-processing failure, not an HTTP/SSE transport error.
 - `success`: transport/protocol success only: the HTTP request succeeded, SSE data parsed without client error, a terminal `[DONE]` was observed, and `error` is `null`. A `finish_reason` such as `length` can still be transport-successful.
 - `validation`: populated by a separate test/evaluation layer, not by `run_one_request`. The evaluator reads `output.text` and records whether a stated expected answer or assertion passed. Leave all validation fields `null` when no evaluation criterion was supplied.
+- The serial runner adds one `run_id` to every record of a run and uses `phase: "warmup"` or `phase: "measure"`. It appends both phases to the same raw JSONL; only successful `measure` records with a numeric metric are included in that metric's summary statistics.
 
 Wall-clock timestamps support correlation with server logs. Monotonic timestamps are the measurement source for durations because wall time can jump or be adjusted. Existing `results/s0/client_record_*.json` artifacts retain their original epoch-float wall-clock values as historical evidence; newly generated records use the ISO-8601 convention above.

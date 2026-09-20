@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from single_request_client import run_one_request
+from transformers import AutoTokenizer
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,6 +37,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--jsonl-file", required=True, type=Path, help="Path to the output JSONL file."
     )
+    parser.add_argument(
+        "--timeout-s",
+        type=float,
+        default=30.0,
+        help="Timeout in seconds for the request.",
+    )
+    parser.add_argument(
+        "--tokenizer-path",
+        type=Path,
+        required=True,
+        help="Path to the local fixed tokenizer snapshot.",
+    )
 
     return parser.parse_args()
 
@@ -52,6 +65,18 @@ def main() -> int:
         print(f"Error reading request file: {e}", file=sys.stderr)
         return 2
 
+    # load tokenizer
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            str(args.tokenizer_path),
+            local_files_only=True,
+            trust_remote_code=False,
+        )
+
+    except (OSError, ValueError) as e:
+        print(f"Error loading tokenizer: {e}", file=sys.stderr)
+        return 2
+
     # 2. Generate a unique request ID for this request
     request_id = f"s0-{uuid.uuid4()}"
 
@@ -62,6 +87,8 @@ def main() -> int:
         request_body=request_body,
         request_id=request_id,
         replica_id=args.replica_id,
+        timeout=args.timeout_s,
+        tokenizer=tokenizer,
     )
 
     # 4. 写入 JSONL 文件, 无论成功与否
