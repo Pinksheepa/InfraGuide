@@ -58,7 +58,11 @@ def run_one_request(
 
     try:
         with requests.post(
-            endpoint, json=request_body, stream=True, timeout=timeout
+            endpoint,
+            json=request_body,
+            headers={"X-Request-ID": request_id},
+            stream=True,
+            timeout=timeout,
         ) as response:
             http_status = response.status_code
             response.raise_for_status()

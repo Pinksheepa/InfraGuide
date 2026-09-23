@@ -1,121 +1,235 @@
-# 一个月推理系统项目计划
+# V1 — vLLM Adaptive Prefill Scheduling Optimization
 
-更新：2026-09-17。当前执行路线；历史路线见 [归档](archive/guide_before_month_plan.md)，不作为本月必做清单。
+更新：2026-09-22。本文件按用户最新要求替换原多副本路由主线；旧四周路线及 checkpoint 中的“随后实现 Least Queue / Prefix Routing”不再作为执行范围。既有代码和实验继续复用。
 
-## 1. 已知约束与目标
+**Current Objective:** 在 2–3 周内完成第一个可写入 AI Infra / LLM Inference 实习简历、能经受源码与性能追问的 V1 项目。完成下述 gate 后立即开始投递，不等待 P1/P2。
 
-- 用户明确提供：投递期限一个月，每周约 35 小时，目标推理系统岗位。
-- 按四周约 140 小时安排；暂按 2026-09-11 启动，2026-10-08 完成四周工作，10-09 至 10-11 留作投递前缓冲。日期为规划假设，不代表用户承诺的精确截止日。
-- 用户提供资源：8 张 5090；另一个服务器有 4 张 V100-32G。5090 环境及单卡运行已有证据，见 doc/s0/environment.md、doc/s0/baseline.md；当前占用与 V100 环境仍需按需核验。
-- [m] 本月集中做一个可复现、能解释个人贡献的推理系统主项目。140 小时是预算，不保证按期实现所有设想或获得面试。
+**V1 Main Feature:** vLLM Adaptive Prefill Scheduling。唯一核心优化问题是：在真实长短请求竞争下，能否通过小幅调整长 prefill 的 token 分配改善短请求响应，同时控制长请求完成时间和吞吐代价？收益与具体策略均待源码及实验验证。
 
-拟定项目主题：**Prefix-aware Multi-replica LLM Serving**。
+**Current Stage:** [已验证][h] S0 最小串行 benchmark 与 S1 双真实副本 RR smoke 均有原始结果；Router 已冻结。Scheduler 优化尚未开始，当前是 P0.1 可重放长短混合 workload 的实现与校准阶段。
 
-核心问题：多个推理副本之间，如何权衡前缀缓存复用和负载，改善请求延迟及满足预设 SLO 的请求速率？
-这是待验证的问题，不预设新策略一定优于基线。仅在实际完成 SLO 测量后使用 SLO-aware 表述。
+**Resume-ready Gate:** 以下各项全部通过才将 V1 标记为完成；不是获得面试或录用的保证。
 
-## 2. 范围与个人实现
+- [x] S0 最小串行测量有正常结果：warmup/repeat、JSONL、TTFT、TPOT estimate；并发 scheduler benchmark 仍需补齐。
+- [ ] S0 扩展后支持稳定的长短混合并发与可重放到达序列。
+- [ ] S1 两个真实 vLLM replica 经 RR Router 正常流式响应，基本 benchmark 可运行。
+- [ ] 能沿固定版本源码讲清 vLLM V1 Scheduler 核心路径，完成 `doc/scheduler-notes.md`。
+- [ ] 有可复现的 contention workload、baseline 数据及问题归因，不仅有“长请求很慢”的现象。
+- [ ] 已核验当前 upstream/main 与相关 open PR，明确真实缺口，无同功能重复实现。
+- [ ] 修改 vLLM core scheduler，开关关闭保留 baseline 行为，patch 小且可审查。
+- [ ] 对应 unit/regression tests 通过，未破坏 token/KV 分配及请求完成语义。
+- [ ] 相同 workload、环境和基准 commit 上完成 Baseline vs Optimized 测量。
+- [ ] 报告 TTFT p50/p95/p99、TPOT（注明估计口径）、吞吐、short-request TTFT、long-request completion time，以及波动和失败数。
+- [ ] 能解释收益来源、退化场景与 latency-throughput tradeoff。
+- [ ] README 与本 guide 的结果索引可追溯真实实验；形成 2–3 条可信简历 bullet。
 
-### 必做
+负结果如实记录，不能填成“性能提升”。若未找到收益，保留分析成果但不虚报达到优化版 gate；按时间盒缩小同一问题内的实验/策略范围，不新增另一条开发线，也不自动延期。
 
-1. 选定可运行的底座、模型与固定版本，复现单卡推理和基线。
-2. 理解底座的请求生命周期、prefill/decode、KV cache 和批处理边界，标明沿用的功能。
-3. 用户实现多副本请求路由，先完成 Round Robin 和 Least Queue。
-4. 在可观测的真实缓存状态基础上，实现或修改前缀与负载联合策略。
-5. 用户主导关键计时、负载生成和统计逻辑，保存可复现结果。
-6. 完成正确性检查、基线对比、消融、失败/退化场景和面试讲解。
+## 1. 当前仓库事实与复用边界
 
-### 本月可选
+本次为文档改写与只读核验，未运行 GPU 实验、未修改实现、未重新执行历史测试。
 
-- 4 副本扩展，前提是 2 副本闭环通过且还有预算。
-- 8 副本只在需要验证某个扩展性问题、资源允许且主体已完成时进行。
-- TP：先做原理与底座源码理解；端到端实现或专项实验仅在主线完成后安排。
-- Chunked prefill 等仅在测量表明与当前问题相关时加入。
-
-### 延后
-
-完整 CUDA GEMM 项目、EP、CP、PP、P/D 分离、跨服务器异构集群。它们不作为本月投递前置条件。
-
-硬件使用计划：[m] 优先验证 5090 环境，从 1 卡底座到同一服务器 2 个单卡副本；兼容性未通过前不承诺底座。V100 服务器作为待验证备选。不同机器/卡型的结果分开记录，不能将硬件变化归因为策略优化。
-
-## 3. 四周预算与退出条件
-
-所有工时包含设计、学习、实现、调试、验证和复盘，由导师在阶段结束时核对实际情况。未知实际耗时则写未知。
-
-| 周 / 阶段 | 35 小时预算 | 工程交付与理解验收 |
+| 项目 | 2026-09-22 核对结果 | 证据 |
 |---|---|---|
-| W1 / S0 环境与基线（09-11 至 09-17） | 环境/底座选择 5h；请求链路阅读与单卡运行 10h；基线与计时 12h；复盘和缓冲 8h | 固定环境与版本，单卡正确运行，保存逐请求结果；用户能解释请求各阶段与指标口径 |
-| W2 / S1 多副本路由（09-18 至 09-24） | 用户设计 5h；双副本及 RR/Least Queue 14h；正确性与负载实验 9h；复盘和缓冲 7h | 请求不丢失、不重复交付；完成/取消/错误后负载状态一致；同一 trace 对比两种策略；用户解释状态更新和失败场景 |
-| W3 / S2 前缀与负载策略（09-25 至 10-01） | 缓存机制和方案 6h；状态观测与策略 13h；消融和退化实验 9h；复盘和缓冲 7h | 真实缓存命中可核验，策略不使用未来信息；比较 RR、Least Queue、Prefix Only、联合策略；用户解释缓存局部性与负载冲突 |
-| W4 / S3 实验与投递整理（10-02 至 10-08） | 固定配置复测 12h；瓶颈证据 6h；README/贡献/简历 7h；理解检查和缓冲 10h | 从记录命令复现实验，说明收益或无收益及适用边界；形成有证据的项目描述和讲解 |
+| Git | `main`，HEAD `b23ff00`；已有未提交文档/client 改动和未跟踪 Router 文件 | `git status --short`、`git log -1 --oneline` |
+| 单请求 client | SSE 解析、首/末 content 与 DONE 时间、本地 tokenizer 重编码、TPOT estimate、有限 HTTP timeout | `src/single_request_client.py` |
+| 串行 benchmark | 单 request body，串行 warmup/repeat；按 phase 落 JSONL，summary 只有有效数、mean、median | `src/run_benchmark.py` |
+| S0 结果 | raw 中 12 条记录：2 warmup + 10 measure；有对应 summary，不能据此声称稳定 P99 或 scheduler 收益 | `results/s0/benchmark/benchmark_run_001.jsonl`、`benchmark_run_001_summary.json` |
+| S1 Router | 单进程持锁 RR、SSE 转发、decision/terminal 日志；两个 replica 的启动入口已存在 | `src/round_robin_router.py`、`src/run_router.py` |
+| S1 验证边界 | checkpoint 记载历史 mock 测试通过，但本次 `tests/` 目录不存在，不能宣称测试当前可复现；真实双副本成功证据未核验 | `doc/PROJECT_CHECKPOINT.md` 与目录核验 |
+| 运行时/模型 | 项目记录为 vLLM 0.29.0、Qwen3-0.6B 固定 revision、bfloat16；本地已安装 scheduler 源文件存在 | `doc/s0/environment.md`、`doc/s0/baseline.md`、`.venv/lib/python3.11/site-packages/vllm/` |
 
-停止扩张规则：
+[h] 现有串行 runner 不能制造并发竞争：只缺什么就补什么，不重写 S0、Router 或 tokenizer，也不为统一接口大规模抽象。
+硬件为用户提供的 8 × RTX 5090；历史环境证据见 `doc/s0/environment.md`，当前占用不由历史记录推断。
 
-- S0 选型额度用尽仍未跑通：记录阻塞，缩减模型或更换已核验兼容的底座；不继续盲目安装多个框架。
-- W2 末仍无双副本正确性与基线：暂停前缀扩展，先交付可靠路由及实验闭环。
-- W3 前缀机制不可观测或改造成本超预算：收缩为负载感知路由，修改项目名称和贡献描述；不得把前缀字符串相同当成 KV 已命中。
-- W4 冻结新功能，优先修复、复测和成果整理。若有剩余时间再考虑 4 副本验证。
-- 连续阻塞时导师先缩小任务和提示，不擅自接管用户核心实现。
+## 2. P0 范围与执行顺序
 
-## 4. 底座选择门槛
+P0 只有 Adaptive Prefill Scheduling 一个核心优化。S0 是测量设施，S1 是已有 serving infrastructure 的最小收尾。
 
-S0 已选择 vLLM 0.29.0、Qwen3-0.6B 固定 revision 与 bfloat16，单请求运行证据见 doc/s0/baseline.md 和 results/s0/README.md；不重新开启选型。后续更换底座时依据官方文档、固定版本源码和现场运行，不能凭印象宣称兼容。
+实际先收口现有 S1，再补并发 workload，继而进入源码/问题复现/小 patch/对比实验；以下编号表示交付项，不要求推倒已完成项重做。
 
-优先检查：
+### P0.1 只补 scheduler benchmark 必需能力
 
-- 当前机器能运行所需模型，依赖安装与后端兼容。
-- 提供流式输出或足够的事件观测，支持可信计时。
-- 多副本调用、请求完成和失败状态可以接入。
-- 前缀缓存可启用、状态可核验，或能在预算内增加必要观测。
-- 源码范围适合用户阅读，能区分上游功能与本人改动。
+复用 `src/single_request_client.py` 和 `src/run_benchmark.py`，保留现有串行调用方式。可增量扩展现有 runner 或增加一个薄的 workload runner，避免重写传输层。
 
-不要求从零实现模型加载、tokenizer、attention kernel 或完整 KV allocator。
-框架已有功能写为沿用/集成；用户重点实现请求状态、路由策略及关键验证逻辑。
+必须补齐：
 
-## 5. 验证与实验口径
+- 一份 workload 中有不同 prompt length、请求类别、稳定 request ID 和 `arrival_offset_ms`。
+- 有限并发，按到达计划发请求；记录计划/实际提交时间与客户端调度延迟，避免将客户端排队误认为 engine 排队。
+- 输入长度按固定 tokenizer 与 chat template 核对；固定输出预算并记录实际输出 token 数、stop/length。
+- 从原始记录计算 TTFT p50/p95/p99、TPOT estimate、request/s 与 output tokens/s；分别汇总短/长请求。
+- 记录 warmup、失败/超时、测试窗口和排空策略；失败数必须报告，不可仅留下成功样本。
+- queue time 若能从固定版本服务端指标或少量埋点可靠获取则增加，否则 N/A；不得用客户端 E2E−计算估计冒充。
 
-先建立小规模、可重放 trace，再扩大矩阵，不直接穷举所有卡数、长度、并发组合。
+计时与计数沿用已验证定义；TPOT estimate 不冒充逐 token ITL。若后续改用服务端 usage，须在两组实验一致使用并注明来源。
 
-- 同一轮策略比较固定模型、revision、dtype、机器与 GPU 数量、框架版本、缓存预算、请求 trace 和采样配置。
-- 区分开环到达率与闭环并发实验；记录实际发送时间，避免客户端限速掩盖排队。
-- trace 至少覆盖无共享、存在共享前缀、热点集中、负载突增。合成数据须明确标注，不冒充生产流量。
-- 缓存预热和冷启动分别定义；策略运行前隔离/重置缓存，避免复用上一策略的状态造成偏差。
-- 调参 trace 与最终评估 trace 分开，运行前冻结策略参数和 SLO，不能根据最终结果反向挑选阈值。
-- 验证缓存启停和命中/未命中时的输出正确性；按具体后端约定数值容差或确定性设置，不能仅凭输出“看起来像”判断。
-- 请求 trace 记录 ID、实际输入/输出 token 数、到达时间、策略、worker、首 token/完成时间、错误/取消/超时。
-- TTFT 明确从客户端提交至首 token 接收，包含排队；内部阶段时间单独记录。
-- TPOT 明确采用请求内首 token 至末 token 的平均间隔，输出不足两个 token 时记 N/A。逐 token ITL 与请求平均 TPOT 分开，不能互换分位数。
-- Goodput 明确为测量窗口内满足预设 TTFT/TPOT SLO 的成功请求数除以窗口时长；说明到达停止、排空和边界请求的处理。失败、超时与拒绝数同时报告，不静默丢弃。
-- 前缀命中率说明是请求比例还是复用 token 比例；真实 KV 命中、预测命中和文本前缀重合分别记录。
-- 路由器只使用决策时可获得的状态，记录状态采集开销、更新延迟和缓存淘汰后的失效处理。
-- 最终关键配置至少 3 次独立运行，保留逐次结果、样本数与波动；尾延迟样本不足时声明限制，不把不稳定 P99 写成确定收益。
-- profiling 与无 profiler 的性能测试分开。吞吐受客户端、网络、CPU 或 GPU 哪一侧限制，都需证据。
+### P0.2 S1 最小闭环，验收即停止
 
-工程验收之外，用户需解释一项设计取舍、一个失败场景，并完成小变式。详见 mentor_prompt。
+使用现有两个 Router 文件，不重写 Router：
 
-## 6. 成果与证据
+```text
+两个独立单卡 vLLM replicas → Round Robin → 完整 SSE → 基本 benchmark
+```
 
-最终按实际完成情况交付：
+至少四个串行请求证明交替路由，client 与 decision 日志按 request ID 关联；正常完成及一个 upstream 不可用场景结果可追溯，不做 retry/failover。
+通过后冻结 Router 功能。Least Load/Least Queue、Prefix-aware Routing、复杂 health check、复杂恢复、Web UI、数据库、control plane 均不进入 P0。
 
-- README：问题、架构、个人贡献、复现方式、核心结果和限制。
-- 固定依赖与代码版本，未提交改动需保存 diff 或源码快照。
-- 每个实验保存环境/配置、命令、原始数据、统计方法及输出；由 checkpoint 索引。
-- `doc/CONTRIBUTIONS.md`：区分底座、用户与 AI 辅助范围。
-- 一条能被实验支撑的简历描述，及 5–10 分钟项目讲解；不填写未经测量的提升比例。
+Scheduler 核心实验直接访问同一个单卡 engine；不经 RR 把竞争请求分散到不同副本，也不把 Router 开销当作 Scheduler 收益。
 
-本月完成标准是“可复现的系统改动、可信对比、清楚的贡献和理解”，不以功能数量或必须取得正向提升验收。
+### P0.3 只读实验所需的 V1 Scheduler 调用链
 
-## 7. 会话安排
+入口（相对于后续固定的 vLLM 源码 checkout，不是 infra 根目录）：
 
-导师负责维护 checkpoint、教学进度、阶段收口和交接。
-默认按 S0、S1、S2、S3 分阶段会话；调试过程不断开，实际切换取决于验收和上下文状态，不机械地按日期切换。
-结束时导师给出下一会话主题、可复制启动语和唯一任务。用户明确要求创建新任务时再创建；不自动创建、归档或假定新会话已读旧聊天。
-当前状态与下一任务以 [PROJECT_CHECKPOINT.md](PROJECT_CHECKPOINT.md) 为入口。
+- `vllm/v1/core/sched/scheduler.py`：`Scheduler.schedule()`，running/waiting 分配路径。
+- `vllm/config/scheduler.py`：相关配置的真实语义、默认值及校验。
+- 必要时追到请求入队、KV allocation、`SchedulerOutput` 和实际 worker/model runner 消费点；不通读整个 vLLM。
 
-## 8. 2026-09-17 推进方式修订
+覆盖 running/waiting queue、token budget、`num_scheduled_tokens`、prefill/decode、chunked/partial prefill、`max_num_batched_tokens`、`long_prefill_token_threshold`、KV block allocation、preemption。
 
-- 按约 2–4 小时可运行工作包推进，关联设计、实现、运行和结果汇总一次布置；实际耗时未知，不声称用户已耗尽第一周 35 小时。
-- 当前 S0 剩余工作合并为最小单卡 benchmark：计数来源、计时边界、串行重复请求和基本汇总。具体任务见 checkpoint。
-- 第一轮小样本用于验证测量流程，不用于声称性能优势或稳定 P99；最终严谨对比仍按第 5 节执行。
-- S0 收口后直接进入 S1 双副本及 RR 路由；不因非阻塞的命名、CLI 美化、抽象或 fake 对象口述反复延期。
-- 未改变本月投递目标；按实际工作包产出滚动调整，不因日历过去六天就假定已投入 30 小时。
+产出 `doc/scheduler-notes.md`（计划文件，本次未创建），按固定 commit+文件+行号回答：
+
+1. request 如何进入 waiting queue？
+2. 何时进入 running，失败或推迟 admission 时发生什么？
+3. prefill 与 decode 如何竞争 token budget？不能假定源码按两个独立阶段实现。
+4. 长 prefill 为何跨多个 step，哪些状态保留已计算进度？
+5. chunk 大小在哪些路径受到哪些约束？
+6. `max_num_batched_tokens` 及版本中其他预算如何限制 step？
+7. KV capacity 如何影响 admission/preemption？
+8. `SchedulerOutput` 经哪条实际调用链交给 worker/model runner？
+
+### 版本与 upstream 查重门槛
+
+[h] 本地安装源码不是已固定的 upstream main checkout。本次可见本地 `schedule(..., throttle_prefills=False)`、`max_num_scheduled_tokens` 和 `max_num_batched_tokens` 两类预算，且配置注释说明 `long_prefill_token_threshold=0` 关闭 cap。不能预设“默认固定 threshold 总在浪费预算”，也不能把已有节流逻辑视为尚未实现。
+
+以查阅时的官方 main 为设计依据，开始实验前固定到 SHA，并记录它与本地安装版本的差异：
+
+- [官方 Scheduler main](https://github.com/vllm-project/vllm/blob/main/vllm/v1/core/sched/scheduler.py)
+- [官方 SchedulerConfig main](https://github.com/vllm-project/vllm/blob/main/vllm/config/scheduler.py)
+
+上述页面本次已访问；尚未完成 main SHA 固定、相关实现的完整比较或 open PR 查重，不能宣称没有重复功能。
+在设计 patch 前搜索官方仓库的 adaptive/chunked prefill、prefill throttling、waiting demand 相关已合并及 open PR，记录日期、链接、状态和语义差异。
+
+若已有同功能实现或 open PR 正在做同功能，不重复实现；只能在可复现证据支持下选择同一调度问题中的具体未覆盖缺口。没有缺口时停止该候选方案，不改名包装已有逻辑。
+运行时使用可追溯源码 checkout 与隔离环境；验证实际 import 路径与构建版本。Baseline 和 Optimized 必须来自同一 SHA 加开关/patch，不能用旧 wheel 对比新 main 把版本变化算作优化。
+
+### P0.4 先复现问题，后设计 feature
+
+先做 smoke 校准，再固定 trace；模型、上下文和输出预算必须适配实际显存及 engine 配置。现有 S0 小模型可以先复用；若运行太快难以稳定制造竞争，先调整长度/到达密度，确有必要才换一个模型并重建两组基线。不要求 100k context。
+
+| Case | workload | 用途 |
+|---|---|---|
+| A | 1 个长 prompt、无其他请求 | 观察无竞争时长 prefill 的预算与完成时间 |
+| B | 1 个长 prompt + 8 个延迟到达的短 prompt（初始方案） | 验证短请求是否确实在长 prefill 尚未结束时进入队列 |
+| C | 一组持续 decode 的请求 + 新长 prompt | 观察加入 prefill 后 decode 延迟是否受影响 |
+| D | 对 A–C 扫描少量固定 `max_num_batched_tokens` 值 | 区分配置效果和策略效果 |
+
+长度、到达偏移和 token budget 先校准后冻结；所有数值是实验参数，不预填未经运行的有效配置。Case B/C 必须验证实际重叠，不凭提交顺序推断竞争。
+基线同时包含 upstream/default、合理固定阈值/预算配置；不能只挑一个刻意劣化的固定配置来证明 adaptive 更好。
+
+必报 TTFT p50/p95/p99、TPOT estimate、throughput、短请求 TTFT 和长请求完成时间。可取得时增加 queueing time、step token allocation、prefill chunk size、waiting/running 数量和 GPU utilization。
+若没有足够证据区分 HOL、单 step 执行时间、KV 压力或客户端排队，写“原因待验证”，补最小观测，不直接把所有尾延迟称为 HOL blocking。
+只有稳定复现问题并解释现有策略的不足，才进入 P0.5。
+
+### P0.5 一个最小 Adaptive Chunked Prefill 策略
+
+[m] 候选假设：依据当前可调度的 waiting demand 和 decode 需求调整长 prefill 的有效 budget，可能在无竞争时利用余量、有竞争时改善短请求响应。不是已证实算法。
+
+设计必须从固定 main 的实际行为出发：
+
+- 无 waiting demand 时，判断放宽 chunk 是否确有价值，不能无视全局预算、KV 或其他路径限制。
+- 存在短 waiting 请求时，只为能实际 admission 的需求考虑预留；不能仅因 waiting 非空就浪费预算。
+- 存在 decode 时，先确认 upstream 已有优先级和节流；不要重复已有保护，也不把所有 running 请求都当成 decode。
+- 明确长请求持续进展的条件，避免饥饿；不得读取未来到达或真实未来输出长度。
+
+只选择一种观测与决策规则，并保留可关闭开关。对默认阈值、固定阈值和自适应行为进行解释，不建立通用 policy framework。
+
+### P0.6 小 patch 与有意义的测试
+
+主要改动限于固定 checkout 的 `vllm/v1/core/sched/scheduler.py`；必要时修改 `vllm/config/scheduler.py` 及对应 `tests/v1/core/`。实际测试文件名、配置入口与 CLI 支持必须以固定版本为准，不创造不存在的接口。
+
+开关关闭 → 同版本 upstream/default 行为；开关开启 → adaptive 行为。避免直接长期修改 site-packages 而没有可审查 patch。
+
+至少覆盖：
+
+- disabled 回归：同一队列与配置得到等价调度输出。
+- 无竞争与有短请求竞争：token 分配符合设计，预算不超限。
+- decode 混合与长 prefill：短请求受保护且长请求能持续进展。
+- KV 容量不足、preemption 或 admission 失败时保留原有正确性。
+- 请求完成/取消后的状态，以及不依赖未来信息的确定性行为。
+
+测试验证行为与不变量，不只镜像实现；再执行与 patch 相关的上游回归测试。本地 S1 mock 测试与 vLLM core regression 是不同证据。
+
+### P0.7 Baseline vs Optimized 闭环
+
+固定同一 GPU、模型/revision、dtype、vLLM SHA、trace、arrival、输出配置、缓存状态及 engine 参数；除策略开关外保持一致。调参 trace 与最终评估 trace 分开。
+
+- 至少 3 次独立运行；交错运行 baseline/optimized，记录设备干扰、错误和波动。
+- 预热与前缀缓存策略保持一致，避免已缓存长 prompt 抹掉 prefill；原始请求实际 token 长度可追溯。
+- 报告全部请求和短/长分组。8 个短请求只是 smoke，不足以支撑稳定 P99；正式实验扩充重复到达序列，注明样本数与分位数算法，样本不足则明确限制。
+- throughput 同时报 request/s 与 output tokens/s，定义起止窗口和排空行为，不把串行单请求 token/s 当系统吞吐。
+- TPOT 平均可能掩盖 decode 停顿；Case C 若需要逐 token/stream 间隔观测，明确粒度，不把 SSE chunk 当 token。
+- profiling/埋点诊断与低开销正式性能运行分开；没有 queue-time 指标就标 N/A。
+- 同时看短请求 TTFT、长请求 completion、TPOT 与 throughput；不隐瞒吞吐下降来突出尾延迟。
+
+结果以原始 JSONL、trace、环境/启动命令、配置、源码 SHA+patch、统计脚本和 summary 保存到计划目录 `results/p0/scheduler/`。README 与本 guide 链接最终结果；尚未产生的数据留空。
+
+## 3. GPU 与时间预算
+
+Scheduler 首先在 **1 × RTX 5090** 上跑清楚；S1 最小闭环使用两个独立单卡副本。
+主体稳定后，TP=2/4 可作为后续不同 engine configuration 验证，不属于 P0 gate。P0 不要求 TP8、DP8、EP、PP、CP，也不因资源充足扩张范围。
+
+[m] 以 2026-09-22 为本次调整起点，2–3 周约为 10-06 至 10-13；此前每周约 35 小时的预算对应约 70–105 小时，不是保证工期。优先两周形成闭环，第三周用于必要复测与整理，不等到 Day 21 才判断能否投递。
+
+| 时间盒 | 唯一阶段产出 |
+|---|---|
+| Day 1–3 | 收尾现有 S0/S1；准备可重放的并发长短请求 workload |
+| Day 4–7 | 固定 main SHA、查重、scheduler-notes、稳定复现 baseline 问题 |
+| Day 8–12 | 最小 adaptive patch 与伴随单测，不新增调度框架 |
+| Day 13–16 | 回归、对比 benchmark、修正实现；若 gate 已满足即投递 |
+| Day 17–21 | 必要补实验、README、2–3 条简历 bullet、源码及 tradeoff 讲解 |
+
+超时先砍可选观测、模型数量、参数组合与扩展规模；保留正确性、源码改动、对照实验和最小 S1 gate。若查重或复现失败，只允许在同一调度问题内缩小候选方案，明确报告缺口，不自动延长 roadmap。
+每次仍是约 2–4 小时工作包，一次给齐设计/实现/运行约束，核心代码由用户实现，模块交付后集中审查；不恢复逐字段或逐句过关。
+
+## 4. P0 完成后才考虑的增强
+
+| 阶段 | 候选范围 | 边界 |
+|---|---|---|
+| P1 / V2 | KVCacheManager、BlockPool、prefix caching、LRU/eviction；选 Session-aware retention | 第二个核心优化只做 Retain/Evict；不同时加入 Prefetch、CPU Offload、Remote KV 或通用 framework |
+| P1.5 / V3 | Cost-aware KV Offload | KV 基础完成后，比较 estimated load cost 与 recompute cost，再决定 reload/recompute；不阻塞 V1 投递 |
+| P2 / V4 | Prefix-aware/Session-aware Router、Least Load、Cache-aware Multi-replica Serving | 不把路由策略扩展带回 P0 |
+| P2 / V5 | TP/DP scaling、TP×DP、EP/MoE | 按具体问题选一个，不要求全实现 |
+| P2 / V6 | CUDA SGEMM、Triton LLM kernel | 独立后续深度，不作为 V1 前置条件 |
+| P2 其他 | Speculative Decoding、P/D Disaggregation、PP、CP | 仅保留候选，不预排完整课程 |
+
+V1 完成即投递；V2–V6 均边投边迭代，不是“完成项目之前必须做”的清单。
+
+P0 明确禁止：重写 Router、完整 KV Framework、所有并行策略、大规模 refactor、为架构美观增加抽象、先开发后找 benchmark、重复上游 feature、强行 TP8、同时开 Scheduler/KV/CUDA 三条线。
+
+## 5. 项目结果与简历描述
+
+当前 scheduler baseline / optimized 结果：**Not measured**。本次只修改路线，不声称完成 Scheduler 阅读、patch、单测或收益验证。
+
+| 结果索引 | 状态 |
+|---|---|
+| S0 原始串行 benchmark | 已有：`results/s0/benchmark/benchmark_run_001.jsonl` 及对应 summary |
+| S1 双真实副本 RR | 已验收：`results/s1/rr_smoke/run_001/`（四请求严格 RR、完整 SSE、受控 502/no-failover；非性能实验） |
+| Scheduler 调用链和 upstream 差异 | 待建立：`doc/scheduler-notes.md` |
+| 固定 trace、baseline、optimized、回归与比较 | 待建立：`results/p0/scheduler/` |
+| README 实验表和复现入口 | 待形成，不预填性能数字 |
+
+最终叙事（模板，不是已完成事实）：
+
+1. 基于固定版本 vLLM V1 Scheduler，定位长短混合请求下具体 token-budget 分配问题，并用源码路径与请求/step 记录建立归因。
+2. 实现可关闭的 adaptive prefill 调整，说明本人修改的路径、实际观测量、预算约束和回归覆盖；不将上游 chunked prefill 写成本人实现。
+3. 用可重放 streaming benchmark 对比 TTFT p50/p95/p99、TPOT、吞吐、短请求响应及长请求完成时间；只填真实数字，并报告 tradeoff 和适用范围。
+
+## 6. Next immediate task（仅一个）
+
+**S1 已验收并冻结；建立单卡长短混合 Scheduler workload 的最小可重放 smoke。** 不修改 Router，不增加 Least Load。
+
+涉及现有文件：`src/run_benchmark.py`、`src/single_request_client.py`；可新增薄的 workload runner 和 trace 文件。实验直接访问同一个单卡 engine，不经 Router。
+
+实验：先以固定 tokenizer 和 chat template 构造一份含 1 个长请求、少量延迟短请求、稳定 request ID 与 `arrival_offset_ms` 的 trace。有限并发按计划提交，记录计划/实际提交、客户端调度延迟和每请求 SSE 结果；校准并验证实际重叠后才冻结长度和偏移。保留失败/超时，按短/长类别汇总；无可靠服务端指标时 queue time 标 `N/A`。
+
+产出计划目录 `results/p0/scheduler/`：trace、启动配置、原始 JSONL、summary 与简短说明。S1 结果固定于 `results/s1/rr_smoke/run_001/`。本包只补 workload 与测量设施，不声称 Scheduler 根因或优化收益。
