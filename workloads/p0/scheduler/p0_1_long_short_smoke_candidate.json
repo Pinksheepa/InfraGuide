@@ -1,0 +1,57 @@
+{
+  "trace_id": "p0_1_long_short_smoke_candidate_v1",
+  "trace_version": 1,
+  "prompt_generation": {
+    "method": "offline_ai_generated_static_fixture",
+    "generator": "OpenAI Codex (GPT-5)",
+    "runtime_generation": false,
+    "note": "Prompt semantics are not scored; files are frozen to control input content and length."
+  },
+  "request_defaults": {
+    "model": "qwen3-0.6b-s0",
+    "temperature": 0,
+    "max_tokens": 64,
+    "stream": true,
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  },
+  "requests": [
+    {
+      "request_id": "p0-1-long-000",
+      "request_class": "long",
+      "phase": "measure",
+      "arrival_offset_ms": 0,
+      "prompt_file": "prompts/long_context_v1.txt",
+      "prompt_sha256": "881fdbb7f03bb345730c8d314bf667d8bb0ffd46bb2ceb45686fe441b527f103",
+      "expected_prompt_tokens": 1185
+    },
+    {
+      "request_id": "p0-1-short-001",
+      "request_class": "short",
+      "phase": "measure",
+      "arrival_offset_ms": 100,
+      "prompt_file": "prompts/short_math_v1.txt",
+      "prompt_sha256": "f06c5a428fce9133f92bd0272a60f0c7d4375cb9a1302ddcb3bda118534a39c5",
+      "expected_prompt_tokens": 33
+    },
+    {
+      "request_id": "p0-1-short-002",
+      "request_class": "short",
+      "phase": "measure",
+      "arrival_offset_ms": 200,
+      "prompt_file": "prompts/short_definition_v1.txt",
+      "prompt_sha256": "1620a16c4079f334b1bd2ae35414f4b6688bd42cc269afd036435ab4b5d10e17",
+      "expected_prompt_tokens": 27
+    },
+    {
+      "request_id": "p0-1-short-003",
+      "request_class": "short",
+      "phase": "measure",
+      "arrival_offset_ms": 300,
+      "prompt_file": "prompts/short_boundary_v1.txt",
+      "prompt_sha256": "cae1b93a19e4dc65403bcf40343ea08764b0c4c4f6daf6e889a72218b50ade9a",
+      "expected_prompt_tokens": 39
+    }
+  ]
+}

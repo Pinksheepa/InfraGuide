@@ -12,7 +12,7 @@
 
 - [x] S0 最小串行测量有正常结果：warmup/repeat、JSONL、TTFT、TPOT estimate；并发 scheduler benchmark 仍需补齐。
 - [ ] S0 扩展后支持稳定的长短混合并发与可重放到达序列。
-- [ ] S1 两个真实 vLLM replica 经 RR Router 正常流式响应，基本 benchmark 可运行。
+- [x] S1 两个真实 vLLM replica 经 RR Router 正常流式响应；已完成严格 RR、完整 SSE 与受控 502/no-failover smoke，Router 已冻结。
 - [ ] 能沿固定版本源码讲清 vLLM V1 Scheduler 核心路径，完成 `doc/scheduler-notes.md`。
 - [ ] 有可复现的 contention workload、baseline 数据及问题归因，不仅有“长请求很慢”的现象。
 - [ ] 已核验当前 upstream/main 与相关 open PR，明确真实缺口，无同功能重复实现。
@@ -215,6 +215,7 @@ P0 明确禁止：重写 Router、完整 KV Framework、所有并行策略、大
 | S0 原始串行 benchmark | 已有：`results/s0/benchmark/benchmark_run_001.jsonl` 及对应 summary |
 | S1 双真实副本 RR | 已验收：`results/s1/rr_smoke/run_001/`（四请求严格 RR、完整 SSE、受控 502/no-failover；非性能实验） |
 | Scheduler 调用链和 upstream 差异 | 待建立：`doc/scheduler-notes.md` |
+| P0.1 候选 trace/真实 smoke | 已有：`results/p0/scheduler/run_001/`；4 成功、两个 short 客户端重叠，非性能基线 |
 | 固定 trace、baseline、optimized、回归与比较 | 待建立：`results/p0/scheduler/` |
 | README 实验表和复现入口 | 待形成，不预填性能数字 |
 
@@ -226,10 +227,10 @@ P0 明确禁止：重写 Router、完整 KV Framework、所有并行策略、大
 
 ## 6. Next immediate task（仅一个）
 
-**S1 已验收并冻结；建立单卡长短混合 Scheduler workload 的最小可重放 smoke。** 不修改 Router，不增加 Least Load。
+**P0.1 候选 smoke 已完成；固定版本后只读建立 vLLM Scheduler 调用链。** 不修改 Router、Scheduler 或增加 Least Load。
 
-涉及现有文件：`src/run_benchmark.py`、`src/single_request_client.py`；可新增薄的 workload runner 和 trace 文件。实验直接访问同一个单卡 engine，不经 Router。
+输入是 `results/p0/scheduler/run_001/`、当前运行时 vLLM `0.29.0` 与后续固定的 upstream checkout；产出 `doc/scheduler-notes.md`。Scheduler 代码只读，不从 run_001 的客户端时间差推断 server queue 或具体调度原因。
 
-实验：先以固定 tokenizer 和 chat template 构造一份含 1 个长请求、少量延迟短请求、稳定 request ID 与 `arrival_offset_ms` 的 trace。有限并发按计划提交，记录计划/实际提交、客户端调度延迟和每请求 SSE 结果；校准并验证实际重叠后才冻结长度和偏移。保留失败/超时，按短/长类别汇总；无可靠服务端指标时 queue time 标 `N/A`。
+覆盖 request 入队、waiting/running、token budget、prefill/decode、chunked/partial prefill、KV allocation/admission/preemption 与 `SchedulerOutput` 的 worker/model-runner 消费点。每项记录 SHA、文件和行号，并标记运行事实、源码事实或待验证。
 
-产出计划目录 `results/p0/scheduler/`：trace、启动配置、原始 JSONL、summary 与简短说明。S1 结果固定于 `results/s1/rr_smoke/run_001/`。本包只补 workload 与测量设施，不声称 Scheduler 根因或优化收益。
+P0.1 结果固定于 `results/p0/scheduler/run_001/`，S1 结果固定于 `results/s1/rr_smoke/run_001/`。本包只补源码理解证据，不写 patch、不声称 Scheduler 根因或优化收益。

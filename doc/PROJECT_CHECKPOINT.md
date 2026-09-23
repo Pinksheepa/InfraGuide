@@ -1,18 +1,18 @@
 # Project Checkpoint
 
-更新：2026-09-23（S1 双真实副本 RR smoke 已验收并冻结；进入 P0.1 Scheduler benchmark）。
+更新：2026-09-23（S1 双真实副本 RR smoke 已验收并冻结；P0.1 候选 trace 已完成真实单卡 smoke，进入 P0.3 源码调用链阅读）。
 
 ## Current Stage / Goal
 
-S0 已完成单卡运行、单请求 client/CLI 功能验证及最小串行 benchmark 的成功/连接失败/零测量参数路径。S1 已完成两个真实单卡 replica、完整 SSE、四请求 Round Robin 与一个无 failover 的 502 验收，Router 功能从此冻结。当前进入 P0.1：为单卡 Scheduler 实验建立可重放的长短混合并发 workload；尚未阅读/修改 Scheduler 或声称性能收益。
+S0 已完成单卡运行、单请求 client/CLI 功能验证及最小串行 benchmark 的成功/连接失败/零测量参数路径。S1 已完成两个真实单卡 replica、完整 SSE、四请求 Round Robin 与一个无 failover 的 502 验收，Router 功能从此冻结。P0.1 已完成候选 trace 的一次真实单卡 smoke：4/4 成功，两个 short 与 long 客户端 in-flight 重叠；它不是 cache-controlled baseline 或性能结论。当前进入 P0.3，只读建立固定版本 vLLM Scheduler 调用链；尚未修改 Scheduler 或声称性能收益。
 本月主线与投递目标不变；实际累计投入未知，不能按日历或对话时间推算。
 执行约 2–4 小时可运行工作包，集中审查，不逐字段或逐句验收。
 
 ## Workspace / Version
 
 - 工作目录：`/nfsdata/nHome/chenjunkun/project/infra`。
-- 本次已读取实现：`src/single_request_client.py`、`src/run_single_cli.py`、`src/run_benchmark.py`、`src/round_robin_router.py`、`src/run_router.py`。
-- Git 已初始化；当前为 `main`，HEAD 为 `b23ff00 s0: single replica with stream client`。未提交改动为文档、`src/single_request_client.py`，且 `src/round_robin_router.py`、`src/run_router.py` 未跟踪；不包含 checkpoint 所称的 `tests/test_round_robin_router.py`。
+- 本次已读取实现：`src/single_request_client.py`、`src/run_single_cli.py`、`src/run_benchmark.py`、`src/round_robin_router.py`、`src/run_router.py`、`src/run_scheduler_workload.py`。
+- Git 已初始化；基准为 `main`/`origin/main` 的 `ae01111 s1: validate real round-robin streaming smoke`。本工作包开始时工作树干净；当前未提交 P0.1 新增 `src/run_scheduler_workload.py` 与 `workloads/p0/scheduler/`，以及本轮出现但不属于该 runner 的 `src/run_benchmark.py` 改动。尚未 commit/push。
 - [已验证][h] 本轮 `py_compile` 覆盖现有四个 S1/S0 文件，且 `src/run_router.py --help` 可运行。当前目录没有 `tests/`；所以 checkpoint 中的 mock-upstream 测试只能作为历史记录，不能称当前可复现。
 - [已验证][h] 2026-09-22 前置快照中 GPU 0--7 均有计算进程（利用率约 47--98%）；8000、8001、8080 当时未监听。端口空闲不构成 GPU 使用授权，也没有为本项目启动或停止任何进程。
 
@@ -38,6 +38,11 @@ S0 已完成单卡运行、单请求 client/CLI 功能验证及最小串行 benc
 - [已验证][h] S1 真实验收位于 `results/s1/rr_smoke/run_001/`。两个 vLLM API/engine 使用独立 PID、port 8000/8001、`world_size=1`；两端 `/v1/models` 均返回固定模型。用户提供的物理配置为 `replica-0=GPU 5`、`replica-1=GPU 6`；log 未独立保存 `CUDA_VISIBLE_DEVICES`，但两端启动时均有约 30.85/31.36 GiB free memory，且整个请求窗口重叠。
 - [已验证][h] 四个 normal client request ID 与 route decision/terminal 一一对应，严格为 `replica-0 -> replica-1 -> replica-0 -> replica-1`；均 HTTP 200、`done_seen=true`、`finish_reason=stop` 和 terminal `completed`。`sse_raw_005.body` 含且仅含一个 `[DONE]`。详见该目录 README。
 - [已验证][h] 第五个 raw 请求后，下一请求唯一选择 `replica-1`；其 terminal 为 `upstream_connection_failed` / `ConnectError`，client 为 HTTP 502、exit 1，未产生 fallback decision。用户确认以 Ctrl-C 停止自己启动的 `replica-1`；停止动作本身未被 log 独立记录。
+- [已验证][h] P0.1 薄 runner 位于 `src/run_scheduler_workload.py`。它复用同步 `run_one_request`，以 `max_in_flight` 限制并发；每条 raw record 保存 trace、计划/实际提交时间、客户端调度延迟、SSE 结果和 engine-config SHA-256。它将 server queue time 明确写为 `N/A`，并按 all/short/long 统计 TTFT p50/p95/p99、TPOT estimate、成功 request/s、output tokens/s 与失败数。
+- [已验证][h] 静态候选 trace 位于 `workloads/p0/scheduler/p0_1_long_short_smoke_candidate.json`；`--validate-trace` 对当前固定 tokenizer/chat template 校验得到 1 条 long 为 1185、3 条 short 为 33/27/39 个本地 prompt tokens，prompt SHA-256 与 trace 相符。fixture 为 AI 辅助生成后冻结的文本，runner 运行时不生成 prompt。
+- [已验证][h] `results/p0/scheduler/run_001/` 是直连 GPU 7 单卡 engine 的候选 smoke：raw 有 4 条 measure record，均 HTTP 200 / `success=true`；`p0-1-short-001`、`p0-1-short-002` 的实际提交均位于 long 的实际提交与 client terminal 之间，`short-003` 不在该区间。完整配置、命令、原始 JSONL、summary、README 与源码/trace SHA-256 见该目录。
+- [已验证][h] run_001 的 long 请求以 `finish_reason="length"` 完成，本地重编码 completion token 为 64，等于固定输出预算；三个 short 为 `stop`。这只记录请求结果，不能推导回答质量、Scheduler 根因或策略收益。
+- [待验证][h] run_001 前 prefix-cache 状态未知，且没有 P0.1 warmup；样本仅 4 条。因此候选 trace 有本次客户端重叠证据，但尚不是冻结的性能 workload，也不能用 summary 中的 p95/p99、throughput 作稳定比较。
 
 ## Learning State / Contributions
 
@@ -46,17 +51,17 @@ S0 对话已检查：GPU 快照边界、设备重编号、SSE/length/DONE、pref
 S0 已集中检查：token 来源/TPOT 端点与说明一致，warmup 未计入 measure 指标，runner 的连接失败记录不进入指标，零测量被拒绝。工程验收通过；既有对话与代码/结果共同构成理解证据，不再重复口述。
 贡献明细：`doc/CONTRIBUTIONS.md`。
 
-## Next Task — P0.1 工作包 1：可重放长短混合 Scheduler workload
+## Next Task — P0.3 工作包 2：固定版本 Scheduler 调用链（只读）
 
 预计用户工作量 2–4 小时，属于规划估计；若明显超出，导师收缩范围或直接解释阻塞，不增加口述关卡。
 
-目标：直接访问一个单卡 vLLM engine，建立可重放的长短 prompt 并发到达 trace 与最小 workload runner；不经 Router 分散请求，不修改 vLLM Scheduler。
+目标：以 run_001 使用的 vLLM `0.29.0` 为当前运行时锚点，另固定可审查的 vLLM 源码 SHA；只读追踪 request 入队、`Scheduler.schedule()`、running/waiting、token budget、KV allocation、`SchedulerOutput` 至 worker/model runner 的调用链。不得修改 Scheduler。
 
-用户实现范围：基于 `src/single_request_client.py` 与 `src/run_benchmark.py` 增量扩展或增加一个薄 runner。trace 至少含稳定 request ID、类别、prompt 来源/实际 token 数、`arrival_offset_ms`、固定输出配置；runner 按计划有限并发提交，记录计划/实际提交时间及客户端调度延迟，并保留每请求 SSE 结果。不得把 client E2E 差值伪装为 server queue time。
+输入：`results/p0/scheduler/run_001/`、实际 import 的 vLLM `0.29.0`、以及后续固定的 upstream checkout。产出：`doc/scheduler-notes.md`，每个核心判断绑定 SHA、文件和行号；明确本地运行时与 upstream SHA 的差异。不得把 client E2E 差值伪装为 server queue time。
 
-产出计划目录：`results/p0/scheduler/` 下的 trace、原始 JSONL、启动配置和简短说明。先完成 1 长 + 少量延迟短请求的 smoke，验证实际时间重叠；本包不报告优化收益，也不写 Adaptive Scheduler patch。
+需要回答：请求如何进入 waiting、何时进入 running、prefill/decode 如何共享预算、长 prefill 的进度状态、chunk 受哪些预算约束、KV capacity/admission/preemption 的关系、以及 `SchedulerOutput` 的实际消费点。先不写 patch、不解释 run_001 的原因、更不报告优化收益。
 
-通过标准：同一 trace 可重复运行；每条记录可追溯到请求/到达计划/实际提交/成功或失败；结果可区分短与长请求；失败和超时不被静默丢弃。具体模型长度、到达偏移与并发度必须先由实际 token 计数和 engine 行为校准后冻结。
+通过标准：`scheduler-notes.md` 的每条核心答案可从固定代码位置复查；清楚区分源码事实、run_001 客户端事实和待验证的服务端行为；没有新代码、Scheduler patch 或收益主张。
 
 ## Session Handoff
 
@@ -66,4 +71,4 @@ S0 已集中检查：token 来源/TPOT 端点与说明一致，warmup 未计入 
 
 进入 P0.1 的启动语：
 
-> 读取更新后的 AGENTS.md、guide 和 PROJECT_CHECKPOINT.md。S1 已冻结；我开始 P0.1 的单卡长短混合 Scheduler workload。请先审查我一次性给出的 trace 和 runner 设计，再由我实现并运行最小重放 smoke。
+> 读取更新后的 AGENTS.md、guide 和 PROJECT_CHECKPOINT.md。S1 已冻结，P0.1 run_001 已证明两个 short 的客户端 in-flight overlap，但不是性能基线。请固定 vLLM 源码版本并只读追踪 Scheduler 调用链，输出带 SHA/文件/行号的 scheduler-notes；不要修改 Router 或 Scheduler。

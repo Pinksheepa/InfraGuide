@@ -129,7 +129,7 @@ def _append_record(path: Path, record: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as output_stream:
         output_stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-
+# 用来估算TPOT的函数, 在single_request_client.py中已经定义了last_content_wall_ts和last_content_monotonic_ns, 这里不需要再定义
 def _numeric_measure_samples(
     measure_records: list[dict[str, Any]], metric_name: str
 ) -> list[float]:
@@ -142,7 +142,7 @@ def _numeric_measure_samples(
             samples.append(float(value))
     return samples
 
-
+# 用来计算指标摘要的函数
 def _metric_summary(samples: list[float]) -> dict[str, int | float | None]:
     if not samples:
         return {"valid_samples": 0, "mean": None, "median": None}
@@ -152,7 +152,7 @@ def _metric_summary(samples: list[float]) -> dict[str, int | float | None]:
         "median": statistics.median(samples),
     }
 
-
+# 汇总数据, 整理为一个字典, 包含运行ID, 配置, 请求计数, 阶段计数, 成功和失败计数, 以及测量指标的摘要
 def build_summary(
     *,
     run_id: str,
@@ -226,6 +226,7 @@ def _write_summary(path: Path, summary: dict[str, Any]) -> None:
 
 def main() -> int:
     args = parse_args()
+    # 过滤掉不合法的参数, 比如warmup/repeat必须是非负数, timeout-s必须是正数, raw-jsonl和summary-json必须是不同的路径
     if args.warmup < 0 or args.repeat <= 0 or args.timeout_s <= 0:
         print(
             "warmup/repeat must be non-negative and timeout-s must be positive.",
@@ -244,7 +245,7 @@ def main() -> int:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"Benchmark setup failed: {exc}", file=sys.stderr)
         return 2
-    except Exception as exc:  # AutoTokenizer emits several dependency-specific errors.
+    except (ImportError, RuntimeError) as exc:  # Tokenizer load errors
         print(f"Tokenizer load failed: {exc}", file=sys.stderr)
         return 2
 

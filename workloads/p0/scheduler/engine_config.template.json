@@ -1,0 +1,17 @@
+{
+  "engine_id": "fill-before-run",
+  "endpoint": "http://127.0.0.1:PORT/v1/chat/completions",
+  "launch_command": "record the exact direct single-engine vLLM launch command here",
+  "model_path_or_id": "record the resolved model path or revision here",
+  "vllm_version_or_source_sha": "record the imported runtime version or fixed source SHA here",
+  "dtype": "record actual dtype here",
+  "gpu_visibility": "record the assigned physical GPU/device mapping here",
+  "scheduler_relevant_config": {
+    "max_model_len": null,
+    "max_num_seqs": null,
+    "max_num_batched_tokens": null,
+    "gpu_memory_utilization": null
+  },
+  "cache_state_before_run": "record the warmup/cache policy or unknown",
+  "notes": "Copy this template into the result run directory, fill observed values, then pass that copy to the runner."
+}
